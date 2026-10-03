@@ -87,3 +87,12 @@ def test_parse_verdicts_reads_an_array_and_stops_at_the_count():
     assert [round(v.risk_score, 2) for v in got] == [0.1, 0.95]
     assert _parse_verdicts(ARRAY, 1, 0)[0].risk_score == 0.1
     assert _parse_verdicts("no json here", 2, 0) == []
+
+
+def test_parse_verdicts_reads_fenced_replies_with_escaped_quotes():
+    raw = ('Here you go:\n```json\n[{"risk_score": 0.9, "category": "x", "reason": "a \\"}\\" b", '
+           '"recommended_action": "block"}, {"risk_score": 0.1, "category": "clean", "reason": "[ok]", '
+           '"recommended_action": "allow"}]\n```')
+    got = _parse_verdicts(raw, 2, 0)
+    assert [v.risk_score for v in got] == [0.9, 0.1]
+    assert got[0].reason == 'a "}" b'

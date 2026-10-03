@@ -503,43 +503,24 @@ def _batch_prompt(windows: List[str], heuristic_score: float, signals: List[str]
     )
 
 
-def _json_spans(raw: str):
-    """Yield each complete top-level JSON object or array, tracking strings.
+def _json_values(raw: str):
+    """Yield each top-level JSON value that starts with ``{`` or ``[`` in ``raw``.
 
-    A flat ``\{[^{}]*\}`` match drops a verdict whose reason contains a brace,
-    which shortens the batch and shifts later windows onto earlier ones.
+    ``raw_decode`` tracks strings, so a brace inside a reason string does not
+    drop that verdict, shorten the batch and shift later windows onto earlier ones.
     """
+    decoder, start = json.JSONDecoder(), re.compile(r"[\[{]")
     i = 0
-    n = len(raw)
-    while i < n:
-        if raw[i] not in "{[":
-            i += 1
-            continue
-        depth = 0
-        in_string = False
-        escaped = False
-        for j in range(i, n):
-            ch = raw[j]
-            if in_string:
-                if escaped:
-                    escaped = False
-                elif ch == "\":
-                    escaped = True
-                elif ch == '"':
-                    in_string = False
-                continue
-            if ch == '"':
-                in_string = True
-            elif ch in "{[":
-                depth += 1
-            elif ch in "}]":
-                depth -= 1
-                if depth == 0:
-                    yield raw[i:j + 1]
-                    i = j + 1
-                    break
-        else:
+    while True:
+        m = start.search(raw, i)
+        if not m:
             return
+        try:
+            data, i = decoder.raw_decode(raw, m.start())
+        except ValueError:
+            i = m.start() + 1
+            continue
+        yield data
 
 
 def _verdict_from_data(data: dict, t0: int) -> SemanticRisk:
@@ -558,14 +539,8 @@ def _parse_verdicts(raw: str, count: int, t0: int) -> List[SemanticRisk]:
     Fewer than asked for is reported by the caller and discarded: a missing
     object cannot be assigned to a later window without shifting the rest.
     """
-    text = re.sub(r"^```[a-z]*\n?", "", (raw or "").strip())
-    text = re.sub(r"\n?```$", "", text)
     out: List[SemanticRisk] = []
-    for blob in _json_spans(text):
-        try:
-            data = json.loads(blob)
-        except ValueError:
-            continue
+    for data in _json_values(raw or ""):
         items = data if isinstance(data, list) else [data]
         for item in items:
             if not isinstance(item, dict) or "risk_score" not in item:
